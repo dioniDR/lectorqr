@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lector de QR</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        #camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin: 20px auto;
+            overflow: hidden;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        #qr-video {
+            width: 100%;
+            height: auto;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            font-size: 18px;
+            min-height: 50px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 5px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Lector de Códigos QR</h1>
+        
+        <div id="camera-container">
+            <video id="qr-video" playsinline></video>
+        </div>
+        
+        <div>
+            <button id="start-button">Iniciar Cámara</button>
+            <button id="stop-button" disabled>Detener Cámara</button>
+        </div>
+        
+        <div id="result">
+            <p>El resultado del escaneo aparecerá aquí</p>
+        </div>
+    </div>
+
+    <script src="jsQR.js"></script>
+    <script>
+        const video = document.getElementById('qr-video');
+        const startButton = document.getElementById('start-button');
+        const stopButton = document.getElementById('stop-button');
+        const resultElement = document.getElementById('result');
+        
+        let stream = null;
+        let scanning = false;
+        let canvasElement = document.createElement('canvas');
+        let canvas = canvasElement.getContext('2d');
+        
+        startButton.addEventListener('click', startCamera);
+        stopButton.addEventListener('click', stopCamera);
+        
+        function startCamera() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment" } 
+                })
+                .then(function(mediaStream) {
+                    stream = mediaStream;
+                    video.srcObject = mediaStream;
+                    video.setAttribute('playsinline', true);
+                    video.play();
+                    scanning = true;
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                    scan();
+                })
+                .catch(function(error) {
+                    console.error("Error al acceder a la cámara: ", error);
+                    resultElement.innerHTML = `<p>Error al acceder a la cámara: ${error.message}</p>`;
+                });
+            } else {
+                console.error("getUserMedia no es soportado por este navegador");
+                resultElement.innerHTML = "<p>La cámara no es soportada por este navegador</p>";
+            }
+        }
+        
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => {
+                    track.stop();
+                });
+                video.srcObject = null;
+                scanning = false;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                resultElement.innerHTML = "<p>El resultado del escaneo aparecerá aquí</p>";
+            }
+        }
+        
+        function scan() {
+            if (!scanning) return;
+            
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvasElement.height = video.videoHeight;
+                canvasElement.width = video.videoWidth;
+                canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+                
+                const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                });
+                
+                if (code) {
+                    console.log("¡QR detectado!", code);
+                    resultElement.innerHTML = `<p>QR detectado: <strong>${code.data}</strong></p>`;
+                    
+                    // Opcionalmente, puedes detener el escaneo después de encontrar un QR
+                    // o continuar escaneando para permitir múltiples lecturas
+                    // stopCamera();
+                }
+            }
+            
+            requestAnimationFrame(scan);
+        }
+    </script>
+</body>
+</html>
