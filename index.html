@@ -61,19 +61,27 @@
             background-color: #cccccc;
             cursor: not-allowed;
         }
+        #status {
+            color: #666;
+            font-style: italic;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Lector de Códigos QR</h1>
         
+        <div id="status">Estado: Listo para iniciar</div>
+        
         <div id="camera-container">
-            <video id="qr-video" playsinline></video>
+            <video id="qr-video" playsinline autoplay muted></video>
         </div>
         
         <div>
             <button id="start-button">Iniciar Cámara</button>
             <button id="stop-button" disabled>Detener Cámara</button>
+            <button id="switch-camera" disabled>Cambiar Cámara</button>
         </div>
         
         <div id="result">
@@ -83,44 +91,85 @@
 
     <script src="jsQR.js"></script>
     <script>
+        // Elementos del DOM
         const video = document.getElementById('qr-video');
         const startButton = document.getElementById('start-button');
         const stopButton = document.getElementById('stop-button');
+        const switchButton = document.getElementById('switch-camera');
         const resultElement = document.getElementById('result');
+        const statusElement = document.getElementById('status');
         
+        // Variables
         let stream = null;
         let scanning = false;
         let canvasElement = document.createElement('canvas');
         let canvas = canvasElement.getContext('2d');
+        let currentFacingMode = 'environment'; // 'environment' es cámara trasera, 'user' es frontal
         
+        // Event listeners
         startButton.addEventListener('click', startCamera);
         stopButton.addEventListener('click', stopCamera);
+        switchButton.addEventListener('click', toggleCamera);
         
-        function startCamera() {
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment" } 
-                })
-                .then(function(mediaStream) {
-                    stream = mediaStream;
-                    video.srcObject = mediaStream;
-                    video.setAttribute('playsinline', true);
-                    video.play();
-                    scanning = true;
-                    startButton.disabled = true;
-                    stopButton.disabled = false;
-                    scan();
-                })
-                .catch(function(error) {
-                    console.error("Error al acceder a la cámara: ", error);
-                    resultElement.innerHTML = `<p>Error al acceder a la cámara: ${error.message}</p>`;
-                });
-            } else {
-                console.error("getUserMedia no es soportado por este navegador");
-                resultElement.innerHTML = "<p>La cámara no es soportada por este navegador</p>";
+        // Función para mostrar el estado
+        function updateStatus(message) {
+            statusElement.textContent = "Estado: " + message;
+            console.log(message);
+        }
+        
+        // Función principal para iniciar la cámara
+        async function startCamera() {
+            updateStatus("Iniciando cámara...");
+            
+            try {
+                // Detener cámara si ya está activa
+                if (stream) {
+                    stopCamera();
+                }
+                
+                // Configuración de la cámara
+                const constraints = {
+                    audio: false,
+                    video: {
+                        facingMode: currentFacingMode,
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                };
+                
+                updateStatus("Solicitando permiso de cámara...");
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                
+                // Conectar el stream al elemento de video
+                video.srcObject = stream;
+                video.setAttribute('playsinline', true);
+                
+                // Esperar a que el video esté listo
+                video.onloadedmetadata = function() {
+                    updateStatus("Video listo, iniciando reproducción...");
+                    video.play()
+                    .then(() => {
+                        updateStatus("Escaneando...");
+                        scanning = true;
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                        switchButton.disabled = false;
+                        scan();
+                    })
+                    .catch(error => {
+                        updateStatus("Error al reproducir: " + error.message);
+                        console.error("Error al reproducir video:", error);
+                    });
+                };
+                
+            } catch (error) {
+                updateStatus("Error al acceder a la cámara: " + error.message);
+                console.error("Error al acceder a la cámara:", error);
+                resultElement.innerHTML = `<p>Error al acceder a la cámara: ${error.message}</p>`;
             }
         }
         
+        // Detener la cámara
         function stopCamera() {
             if (stream) {
                 stream.getTracks().forEach(track => {
@@ -130,10 +179,21 @@
                 scanning = false;
                 startButton.disabled = false;
                 stopButton.disabled = true;
+                switchButton.disabled = true;
                 resultElement.innerHTML = "<p>El resultado del escaneo aparecerá aquí</p>";
+                
+                updateStatus("Cámara detenida");
             }
         }
         
+        // Cambiar entre cámaras (frontal/trasera)
+        function toggleCamera() {
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            updateStatus(`Cambiando a cámara ${currentFacingMode === 'environment' ? 'trasera' : 'frontal'}...`);
+            startCamera();
+        }
+        
+        // Escaneo QR
         function scan() {
             if (!scanning) return;
             
@@ -143,17 +203,26 @@
                 canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
                 
                 const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                    inversionAttempts: "dontInvert",
-                });
                 
-                if (code) {
-                    console.log("¡QR detectado!", code);
-                    resultElement.innerHTML = `<p>QR detectado: <strong>${code.data}</strong></p>`;
+                try {
+                    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: "dontInvert",
+                    });
                     
-                    // Opcionalmente, puedes detener el escaneo después de encontrar un QR
-                    // o continuar escaneando para permitir múltiples lecturas
-                    // stopCamera();
+                    if (code) {
+                        console.log("¡QR detectado!", code);
+                        resultElement.innerHTML = `<p>QR detectado: <strong>${code.data}</strong></p>`;
+                        
+                        // Opcional: vibrar al detectar (solo en dispositivos compatibles)
+                        if ('vibrate' in navigator) {
+                            navigator.vibrate(200);
+                        }
+                        
+                        // Opcional: detener escaneo después de encontrar un QR
+                        // stopCamera();
+                    }
+                } catch (error) {
+                    console.error("Error durante el escaneo:", error);
                 }
             }
             
